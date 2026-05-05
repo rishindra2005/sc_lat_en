@@ -12,10 +12,11 @@ export default function Home() {
   const [template, setTemplate] = useState<TemplateType>('Standard Article');
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [images, setImages] = useState<{name: string, data?: string, url?: string}[]>([]);
 
   // Debounced LaTeX update and compilation
   const debouncedCompile = useRef(
-    debounce(async (latex: string) => {
+    debounce(async (latex: string, imagesToCompile?: {name: string, data?: string, url?: string}[]) => {
       if (!latex || latex.length < 50) return;
       
       setIsCompiling(true);
@@ -23,7 +24,7 @@ export default function Home() {
         const response = await fetch('/api/compile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ latex }),
+          body: JSON.stringify({ latex, images: imagesToCompile || [] }),
         });
 
         if (response.ok) {
@@ -42,16 +43,20 @@ export default function Home() {
 
   const handleEditorChange = useCallback((json: any) => {
     setJsonContent(json);
-    const latex = parseToLatex(json, template);
+    const imageList: {name: string, data?: string, url?: string}[] = [];
+    const latex = parseToLatex(json, template, imageList);
+    setImages(imageList);
     setLatexSource(latex);
-    debouncedCompile(latex);
+    debouncedCompile(latex, imageList);
   }, [template, debouncedCompile]);
 
   useEffect(() => {
     if (jsonContent) {
-      const latex = parseToLatex(jsonContent, template);
+      const imageList: {name: string, data?: string, url?: string}[] = [];
+      const latex = parseToLatex(jsonContent, template, imageList);
+      setImages(imageList);
       setLatexSource(latex);
-      debouncedCompile(latex);
+      debouncedCompile(latex, imageList);
     }
   }, [template, jsonContent, debouncedCompile]);
 
@@ -63,19 +68,16 @@ export default function Home() {
         try {
           let rawText = (e.target?.result as string).trim();
           
-          // Remove trailing comma if present (common in snippet exports)
           if (rawText.endsWith(',')) {
             rawText = rawText.slice(0, -1);
           }
 
-          // If it starts with "content": wrap it in braces
           if (rawText.startsWith('"content":')) {
             rawText = `{ ${rawText} }`;
           }
 
           const json = JSON.parse(rawText);
           
-          // Logic to extract actual TipTap content
           let actualContent = json;
           if (json.content) {
             if (typeof json.content === 'string') {
@@ -83,7 +85,6 @@ export default function Home() {
                 const parsed = JSON.parse(json.content);
                 actualContent = parsed;
               } catch (e) {
-                // If it's not JSON string, use as is
                 actualContent = json.content;
               }
             } else {
@@ -163,7 +164,7 @@ export default function Home() {
             <div className="flex items-center gap-2">
               {isCompiling && <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />}
               <button 
-                onClick={() => debouncedCompile(latexSource)}
+                onClick={() => debouncedCompile(latexSource, images)}
                 className="text-indigo-400 hover:text-indigo-300 transition-colors"
               >
                 <Play className="w-3 h-3" fill="currentColor" />

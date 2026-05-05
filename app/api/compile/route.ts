@@ -7,7 +7,7 @@ import os from 'os';
 
 export async function POST(req: NextRequest) {
   try {
-    const { latex } = await req.json();
+    const { latex, images } = await req.json();
     if (!latex) {
       return NextResponse.json({ error: 'No LaTeX content provided' }, { status: 400 });
     }
@@ -18,6 +18,27 @@ export async function POST(req: NextRequest) {
 
     const texFile = path.join(tempDir, 'document.tex');
     fs.writeFileSync(texFile, latex);
+
+    if (images && Array.isArray(images)) {
+      for (const img of images) {
+        if (img.name) {
+          const imgPath = path.join(tempDir, img.name);
+          if (img.data) {
+            fs.writeFileSync(imgPath, img.data, 'base64');
+          } else if (img.url) {
+            try {
+              const imgRes = await fetch(img.url);
+              if (imgRes.ok) {
+                const arrayBuffer = await imgRes.arrayBuffer();
+                fs.writeFileSync(imgPath, Buffer.from(arrayBuffer));
+              }
+            } catch (err) {
+              console.error(`Failed to fetch image ${img.url}`, err);
+            }
+          }
+        }
+      }
+    }
 
     // Run pdflatex twice for references if needed, but once for now
     return new Promise<NextResponse>((resolve) => {

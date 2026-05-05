@@ -160,7 +160,7 @@ const TiptapEditor = ({ content, onChange }: TiptapEditorProps) => {
         // Use a small timeout to ensure the editor is ready to receive content
         // especially when immediatelyRender is false
         setTimeout(() => {
-          editor.commands.setContent(content, false);
+          editor.commands.setContent(content, { emitUpdate: false });
         }, 10);
       }
     }

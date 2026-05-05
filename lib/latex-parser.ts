@@ -67,7 +67,7 @@ export const TEMPLATES: Record<TemplateType, { preamble: string; postamble: stri
   },
 };
 
-export const parseToLatex = (json: any, template: TemplateType): string => {
+export const parseToLatex = (json: any, template: TemplateType, imageList?: {name: string, data?: string, url?: string}[]): string => {
   if (!json || !json.content) return '';
 
   const { preamble, postamble } = TEMPLATES[template] || TEMPLATES['Standard Article'];
@@ -86,7 +86,7 @@ export const parseToLatex = (json: any, template: TemplateType): string => {
   // Parse remaining nodes
   json.content.forEach((node: any) => {
     if (node.type === 'entitySection') return;
-    latex += parseNode(node);
+    latex += parseNode(node, imageList);
   });
 
   latex += postamble;
@@ -102,34 +102,29 @@ const getRawText = (content: any[]): string => {
   }).join('');
 };
 
-const parseNode = (node: any): string => {
+const parseNode = (node: any, imageList?: {name: string, data?: string, url?: string}[]): string => {
   switch (node.type) {
     case 'paragraph': {
       const rawText = getRawText(node.content);
       
-      // CRITICAL FIX: Split by double newlines because TipTap sometimes crams 
-      // multiple logical blocks into a single paragraph text node.
       const blocks = rawText.split(/\n\n+/);
       if (blocks.length > 1) {
-        return blocks.map(b => parseNode({ type: 'paragraph', content: [{ type: 'text', text: b }] })).join('');
+        return blocks.map(b => parseNode({ type: 'paragraph', content: [{ type: 'text', text: b }] }, imageList)).join('');
       }
 
-      // Special case: If paragraph ONLY contains an image (or image + empty text), handle it as a block image
       const isOnlyImage = node.content?.length === 1 && node.content[0].type === 'image';
       if (isOnlyImage) {
-        return parseNode(node.content[0]);
+        return parseNode(node.content[0], imageList);
       }
 
       const contentText = rawText.trim();
       if (!contentText && (!node.content || node.content.length === 0)) return '\n\n';
 
-      // 1. Abstract detection
       if (/^abstract:?\s*/i.test(contentText)) {
         const text = contentText.replace(/^abstract:?\s*/i, '').trim();
         return `\\begin{abstract}\n${escapeLatex(text)}\n\\end{abstract}\n\n`;
       }
 
-      // 2. Markdown-style Heading detection (hashes)
       const mdMatch = contentText.match(/^(#{1,3})\s*(?:\d+(?:\.\d+)*\.?\s*)?(.+)/);
       if (mdMatch) {
         const level = mdMatch[1].length;
@@ -138,7 +133,6 @@ const parseNode = (node: any): string => {
         return `\\${cmd}{${escapeLatex(title)}}\n\n`;
       }
 
-      // 3. Numbered Heading detection (no hashes)
       const numMatch = contentText.match(/^(\d+(?:\.\d+)*\.?\s+)(.+)/);
       if (numMatch && contentText.length < 150) {
         const numbering = numMatch[1];
@@ -149,7 +143,6 @@ const parseNode = (node: any): string => {
         return `\\${cmd}{${escapeLatex(title)}}\n\n`;
       }
 
-      // 4. Semantic Section Keywords
       const clean = contentText.replace(/[:.]$/, '').trim();
       const lower = clean.toLowerCase();
       const keywords = ['introduction', 'conclusion', 'references', 'materials and methods', 'discussion', 'results', 'background', 'acknowledgments'];
@@ -157,7 +150,7 @@ const parseNode = (node: any): string => {
         return `\\section{${clean.charAt(0).toUpperCase() + clean.slice(1)}}\n\n`;
       }
 
-      return `${parseContent(node.content)}\n\n`;
+      return `${parseContent(node.content, imageList)}\n\n`;
     }
     case 'heading': {
       const level = node.attrs.level;
@@ -167,35 +160,63 @@ const parseNode = (node: any): string => {
       return `\\${cmd}{${escapeLatex(title)}}\n\n`;
     }
     case 'bulletList':
-      return `\\begin{itemize}\n${parseContent(node.content)}\\end{itemize}\n\n`;
+      return `\\begin{itemize}\n${parseContent(node.content, imageList)}\\end{itemize}\n\n`;
     case 'orderedList':
-      return `\\begin{enumerate}\n${parseContent(node.content)}\\end{enumerate}\n\n`;
+      return `\\begin{enumerate}\n${parseContent(node.content, imageList)}\\end{enumerate}\n\n`;
     case 'listItem':
-      return `  \\item ${parseContent(node.content).trim()}\n`;
+      return `  \\item ${parseContent(node.content, imageList).trim()}\n`;
     case 'table':
-      return parseTable(node);
-    case 'image':
+      return parseTable(node, imageList);
+    case 'image': {
       const alt = node.attrs.alt || 'image';
-      // In professional LaTeX, we use example-image-a for placeholder if src is missing or external
-      return `\n\\begin{figure}[h]\n  \\centering\n  \\includegraphics[width=0.7\\linewidth]{example-image-a}\n  \\caption{${escapeLatex(alt)}}\n\\end{figure}\n\n`;
+      let filename = 'example-image-a';
+      
+      const src = node.attrs.src;
+      if (src && imageList) {
+        if (src.startsWith('data:image/')) {
+          const match = src.match(/^data:image\/([a-zA-Z0-9]+);base64,/);
+          const ext = match ? match[1] : 'png';
+          const cleanExt = ext === 'jpeg' ? 'jpg' : ext;
+          filename = `image_${imageList.length}.${cleanExt}`;
+          const base64Data = src.replace(/^data:image\/[a-zA-Z0-9]+;base64,/, '');
+          imageList.push({ name: filename, data: base64Data });
+        } else if (src.startsWith('http://') || src.startsWith('https://')) {
+          let ext = 'jpg';
+          try {
+            const urlObj = new URL(src);
+            const pathParts = urlObj.pathname.split('.');
+            if (pathParts.length > 1) {
+              const urlExt = pathParts.pop()?.toLowerCase();
+              if (urlExt && ['jpg', 'jpeg', 'png', 'pdf'].includes(urlExt)) {
+                ext = urlExt === 'jpeg' ? 'jpg' : urlExt;
+              }
+            }
+          } catch(e) {}
+          filename = `image_${imageList.length}.${ext}`;
+          imageList.push({ name: filename, url: src });
+        }
+      }
+
+      return `\n\\begin{figure}[h]\n  \\centering\n  \\includegraphics[width=0.7\\linewidth]{${filename}}\n  \\caption{${escapeLatex(alt)}}\n\\end{figure}\n\n`;
+    }
     case 'citation':
       return `\\cite{${node.attrs.id || 'ref'}}`;
     case 'referenceSection':
-      return `\\section*{References}\n${parseContent(node.content)}\n`;
+      return `\\section*{References}\n${parseContent(node.content, imageList)}\n`;
     case 'horizontalRule':
       return `\\hrule\n\n`;
     case 'hardBreak':
       return '\\\\\n';
     case 'blockquote':
-      return `\\begin{quote}\n${parseContent(node.content)}\n\\end{quote}\n\n`;
+      return `\\begin{quote}\n${parseContent(node.content, imageList)}\n\\end{quote}\n\n`;
     case 'codeBlock':
-      return `\\begin{verbatim}\n${parseContent(node.content)}\n\\end{verbatim}\n\n`;
+      return `\\begin{verbatim}\n${parseContent(node.content, imageList)}\n\\end{verbatim}\n\n`;
     default:
       return '';
   }
 };
 
-const parseContent = (content: any[]): string => {
+const parseContent = (content: any[], imageList?: {name: string, data?: string, url?: string}[]): string => {
   if (!content) return '';
   return content.map(item => {
     if (item.type === 'text') {
@@ -211,12 +232,11 @@ const parseContent = (content: any[]): string => {
       }
       return text;
     }
-    // RECURSIVE FIX: Ensure images or other nodes nested inside paragraph content are parsed
-    return parseNode(item);
+    return parseNode(item, imageList);
   }).join('');
 };
 
-const parseTable = (node: any): string => {
+const parseTable = (node: any, imageList?: {name: string, data?: string, url?: string}[]): string => {
   const rows = node.content || [];
   if (rows.length === 0) return '';
 
@@ -228,7 +248,7 @@ const parseTable = (node: any): string => {
 
   rows.forEach((row: any, index: number) => {
     const cells = row.content || [];
-    const cellContents = cells.map((cell: any) => parseContent(cell.content).trim());
+    const cellContents = cells.map((cell: any) => parseContent(cell.content, imageList).trim());
     tableLatex += `  ${cellContents.join(' & ')} \\\\ \n`;
     
     if (index === 0) {
