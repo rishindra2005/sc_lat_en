@@ -121,7 +121,7 @@ export default function Home() {
               <ChevronDown className="w-4 h-4 text-slate-500" />
             </button>
             <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-md shadow-lg hidden group-hover:block z-50 overflow-hidden">
-              {['Standard Article', 'IEEE / Two-Column', 'APA', 'Modern / Custom'].map((t) => (
+              {['Standard Article', 'IEEE / Two-Column', 'IEEE / Single Col Abstract', 'APA', 'Modern / Custom'].map((t) => (
                 <button
                   key={t}
                   onClick={() => setTemplate(t as TemplateType)}

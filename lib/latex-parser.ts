@@ -1,4 +1,4 @@
-export type TemplateType = 'Standard Article' | 'IEEE / Two-Column' | 'APA' | 'Modern / Custom';
+export type TemplateType = 'Standard Article' | 'IEEE / Two-Column' | 'IEEE / Single Col Abstract' | 'APA' | 'Modern / Custom';
 
 export const TEMPLATES: Record<TemplateType, { preamble: string; postamble: string }> = {
   'Standard Article': {
@@ -17,6 +17,21 @@ export const TEMPLATES: Record<TemplateType, { preamble: string; postamble: stri
     postamble: `\n\\end{document}`,
   },
   'IEEE / Two-Column': {
+    preamble: `\\documentclass[10pt,journal,compsoc]{IEEEtran}
+\\usepackage[utf8]{inputenc}
+\\usepackage[T1]{fontenc}
+\\usepackage{hyperref}
+\\usepackage{booktabs}
+\\usepackage{graphicx}
+\\usepackage{cite}
+\\usepackage{tabularx}
+\\usepackage{mwe}
+
+\\begin{document}
+`,
+    postamble: `\n\\end{document}`,
+  },
+  'IEEE / Single Col Abstract': {
     preamble: `\\documentclass[10pt,journal,compsoc]{IEEEtran}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
@@ -73,6 +88,8 @@ export const parseToLatex = (json: any, template: TemplateType, imageList?: {nam
   const { preamble, postamble } = TEMPLATES[template] || TEMPLATES['Standard Article'];
   let latex = preamble;
 
+  const isIEEESingleCol = template === 'IEEE / Single Col Abstract';
+
   // Find entitySection for frontmatter
   const entityNode = json.content.find((node: any) => node.type === 'entitySection');
   if (entityNode) {
@@ -80,12 +97,48 @@ export const parseToLatex = (json: any, template: TemplateType, imageList?: {nam
     latex += `\\title{${escapeLatex(title || '')}}\n`;
     latex += `\\author{${escapeLatex(authors || '')}${college ? `\\\\ \\small ${escapeLatex(college)}` : ''}}\n`;
     latex += `\\date{\\today}\n`;
+  }
+
+  // If using the IEEE single column abstract, we need to extract the abstract now
+  let abstractNode: any = null;
+  let abstractText = '';
+  
+  if (isIEEESingleCol) {
+    abstractNode = json.content.find((node: any) => {
+      if (node.type === 'paragraph') {
+        const rawText = getRawText(node.content);
+        return /^abstract:?\s*/i.test(rawText.trim());
+      }
+      return false;
+    });
+
+    if (abstractNode) {
+      const rawText = getRawText(abstractNode.content).trim();
+      abstractText = escapeLatex(rawText.replace(/^abstract:?\s*/i, '').trim());
+    }
+
+    if (abstractText) {
+      latex += `\\IEEEtitleabstractindextext{
+\\begin{abstract}
+${abstractText}
+\\end{abstract}
+}
+`;
+    }
+  }
+
+  // Emit maketitle after optional IEEEtitleabstractindextext
+  if (entityNode) {
     latex += `\\maketitle\n\n`;
+    if (isIEEESingleCol) {
+      latex += `\\IEEEdisplaynontitleabstractindextext\n\\IEEEpeerreviewmaketitle\n\n`;
+    }
   }
 
   // Parse remaining nodes
   json.content.forEach((node: any) => {
     if (node.type === 'entitySection') return;
+    if (isIEEESingleCol && node === abstractNode) return; // Skip abstract as it's already rendered
     latex += parseNode(node, imageList);
   });
 
